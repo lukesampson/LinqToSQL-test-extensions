@@ -1,7 +1,7 @@
 What is this?
 -------------
 
-A single T4 file that mocks your LinqToSQL DataContext and lets you write tests against an in-memory version of it.
+A single T4 file that mocks your Linq to SQL data context and lets you write tests against an in-memory version of it.
 
 Setup
 --------
