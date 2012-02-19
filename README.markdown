@@ -1,8 +1,7 @@
 What is this?
 -------------
 
-Allowed you to test code that uses a LinqToSQL DataContext,
-with an in-memory implementation of your DataContext.
+A single T4 file that mocks your LinqToSQL DataContext and lets you write tests against an in-memory version of it.
 
 Setup
 --------
