@@ -33,7 +33,13 @@ code that's using a concrete type of `ExampleDataContext`...
       return db.Products().ToList();
     }
     
-... you can make it testable by using the interface `IExampleDataContext`. That way, you
-can pass in a `MemoryExampleDataContext` for testing, and a real `ExampleDataContext` in production.
+... you can make it testable by using the interface `IExampleDataContext`.
+
+    public static List<Product> GetProducts(IExampleDataContext db) {
+      return db.Products().ToList();
+    }
+
+That way, you can call GetProducts with a `MemoryExampleDataContext` for testing, and a real
+`ExampleDataContext` in production.
 
 
