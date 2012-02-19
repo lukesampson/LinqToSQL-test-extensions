@@ -1,0 +1,411 @@
+<#@ template language="C#" hostspecific="True" #>
+<#@ assembly name="System.Configuration" #>
+<#@ assembly name="System.Core" #>
+<#@ assembly name="System.Xml" #>
+<#@ assembly name="System.Xml.Linq" #>
+<#@ assembly name="EnvDTE" #>
+<#@ import namespace="System.Xml.Linq" #>
+<#@ import namespace="System.IO" #>
+<#@ import namespace="System.Configuration" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="EnvDTE" #>
+<#
+var dbmlFileName = Host.TemplateFile.Substring(0, Host.TemplateFile.IndexOf('.')) + ".dbml";
+var dbmlDir = Path.GetDirectoryName(Host.TemplateFile);
+var dbmlPath = Path.Combine(dbmlDir, dbmlFileName);
+
+// work out the namespace
+IServiceProvider serviceProvider = (IServiceProvider)Host;
+DTE dte = (DTE)serviceProvider.GetService(typeof(DTE));
+ProjectItem templateItem = dte.Solution.FindProjectItem(Host.TemplateFile);
+
+var proj = templateItem.ContainingProject;
+var baseNs = proj.Properties.Item("DefaultNamespace").Value;
+var projDir = Path.GetDirectoryName(proj.FullName);
+string relDir = dbmlDir.Substring(projDir.Length).Trim('\\');
+var ns = baseNs;
+foreach(var part in relDir.Split('\\')) {
+	ns += "." + part;
+}
+
+var xml = XDocument.Load(dbmlPath);
+XNamespace xns = "http://schemas.microsoft.com/linqtosql/dbml/2007";
+
+XElement dbEl = xml.Document.Root;
+
+var className = dbEl.Attribute("Class").Value;
+var iface = "I" + className;
+#>
+// <#= relDir #>
+// Auto-generated from <#= dbmlPath #>
+using System;
+using System.Collections.Generic;
+using System.Data.Linq;
+using System.Data.Linq.Mapping;
+using System.Linq;
+using System.Linq.Expressions;
+using System.Reflection;
+using System.ComponentModel;
+
+namespace <#= ns #> {
+
+	#region <#= iface #>
+	public interface <#= iface #> : IDisposable {
+		<# foreach(XElement table in dbEl.Elements(xns + "Table")) { #>
+		
+		ITable<<#= table.Element(xns + "Type").Attribute("Name").Value #>> <#= table.Attribute("Member").Value #> { get; }
+		<# } #>
+
+		ITable<TEntity> GetTable<TEntity>() where TEntity: class;
+
+		void SubmitChanges();
+	}
+	#endregion
+
+	#region Partial class extensions to <#= className #>
+	public partial class <#= className #> : <#= iface #> {
+		<# foreach(XElement table in dbEl.Elements(xns + "Table")) { #>
+		
+		ITable<<#= table.Element(xns + "Type").Attribute("Name").Value #>> <#= iface #>.<#= table.Attribute("Member").Value #> {
+			get { return this.<#= table.Attribute("Member").Value #>; }
+		}
+		<# } #>
+
+		ITable<TEntity> <#= iface #>.GetTable<TEntity>() {
+			return this.GetTable<TEntity>();
+		}
+		
+	}
+	#endregion
+	
+	#region In-memory version of <#= iface #>
+	public class Memory<#= className #> : IMockDataContext, <#= iface #> {
+
+		Dictionary<Type, ITable> _tables = new Dictionary<Type, ITable>();
+		static MappingSource mappingSource = new AttributeMappingSource();
+
+		<# foreach(XElement table in dbEl.Elements(xns + "Table")) { #>
+		
+		public ITable<<#= table.Element(xns + "Type").Attribute("Name").Value #>> <#= table.Attribute("Member").Value #> {
+			get { return GetTable<<#= table.Element(xns + "Type").Attribute("Name").Value #>>(); }
+		}
+		<# } #>
+
+		public ITable GetTable(Type type) {
+			ITable table;
+			if(!_tables.TryGetValue(type, out table)) {
+				var tableType = typeof(MemoryTable<>).MakeGenericType(type);
+
+				table = Activator.CreateInstance(tableType, this) as ITable;
+				_tables.Add(type, table);
+			}
+			return table;
+		}
+
+		public ITable<TEntity> GetTable<TEntity>() where TEntity : class {
+			var type = typeof(TEntity);
+
+			ITable table;
+			if(!_tables.TryGetValue(type, out table)) {
+				table = new MemoryTable<TEntity>(this);
+				_tables.Add(type, table);
+			}
+
+			return (ITable<TEntity>)table;
+		}
+
+
+		public void SubmitChanges() {
+			foreach(var table in _tables.Values) {
+				((IMockTable)table).SubmitChanges();
+			}
+		}
+
+		public MetaModel Mapping {
+			get {
+				return mappingSource.GetModel(typeof(<#= iface #>));
+			}
+		}
+
+		public void Dispose() {
+			// no un-managed resources, let GC handle it
+		}
+	}
+	#endregion
+	
+	#region Supporting code for in-memory testing
+	public interface IMockDataContext {
+		MetaModel Mapping { get; }
+		ITable<TEntity> GetTable<TEntity>() where TEntity: class;
+		ITable GetTable(Type type);
+	}
+	
+	public interface IMockTable {
+		void SubmitChanges();
+	}
+	
+	#region MemoryTable
+	public class MemoryTable<TEntity> : IMockTable, ITable, ITable<TEntity> where TEntity : class {
+		IMockDataContext _context;
+		MetaTable _metaTable;
+
+		List<TEntity> _stored = new List<TEntity>();
+		List<TEntity> _insert = new List<TEntity>();
+		List<TEntity> _delete = new List<TEntity>();
+
+		int _nextId = 1;
+
+		object lockObj = new object();
+
+		public MemoryTable(IMockDataContext context) {
+			_context = context;
+			_metaTable = _context.Mapping.GetTable(typeof(TEntity));
+		}
+
+		public void SubmitChanges() {
+			var ids = _metaTable.RowType.IdentityMembers;
+			var autoIds = ids.Where(id => id.IsDbGenerated);
+			if(autoIds.Count() > 1) throw new NotImplementedException("Can't handle more than one auto-generated identity column!");
+
+			lock(lockObj) {
+				foreach(var insert in _insert) {
+					if(autoIds.Count() > 0) {
+						((PropertyInfo)autoIds.First().Member).SetValue(insert, _nextId++, null);
+					}
+
+					_stored.Add(insert);
+				}
+
+				foreach(var entity in _delete) {
+					_stored.Remove(entity);
+				}
+
+				_insert.Clear();
+			}
+		}
+
+		public void Attach(TEntity entity) {
+			throw new NotImplementedException();
+		}
+
+		public void DeleteOnSubmit(TEntity entity) {
+			_delete.Add(entity);
+		}
+
+		public void InsertOnSubmit(TEntity entity) {
+			lock(lockObj) {
+				var rowType = _metaTable.RowType;
+
+				// insert linked objects
+				var fk_assocs = rowType.Associations.Where(a => a.IsForeignKey);
+				foreach(var fk_assoc in fk_assocs) {
+					var prop = (PropertyInfo)fk_assoc.ThisMember.Member;
+					var fk_entity = prop.GetValue(entity, null);
+					if(fk_entity != null) {
+						if(fk_assoc.OtherKey.Count > 1) continue; // don't know how to handle more than one key!
+						var key = fk_assoc.OtherKey[0].MappedName;
+
+						// update the FK property
+						// not easy to do, because the entity reference is already set
+						if(fk_assoc.OtherMember == null) {
+							// no child property
+							// have to get a bit evil and use reflection on private field in this case
+							((INotifyPropertyChanged)fk_entity).PropertyChanged += (sender, e) => {
+								if(e.PropertyName == key) {
+									var thisKeyName = fk_assoc.ThisKey[0].Name;
+									var idField = entity.GetType().GetField("_" + thisKeyName, BindingFlags.Instance | BindingFlags.NonPublic);
+
+									var otherKey = fk_entity.GetType().GetProperty(key);
+									var otherKeyVal = otherKey.GetValue(fk_entity, null);
+
+									idField.SetValue(entity, otherKeyVal);
+								}
+							};
+						} else {
+							((INotifyPropertyChanged)fk_entity).PropertyChanged += (sender, e) => {
+								if(e.PropertyName == key) {
+									prop.SetValue(entity, null, null);
+									prop.SetValue(entity, fk_entity, null);
+								}
+							};
+						}
+						_context.GetTable<Entity>().InsertOnSubmit((Entity)fk_entity);
+					}
+				}
+
+				_insert.Add(entity);
+			}
+		}
+
+		public IEnumerator<TEntity> GetEnumerator() {
+			return _stored.GetEnumerator();
+		}
+
+		System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() {
+			return _stored.GetEnumerator();
+		}
+
+		public Type ElementType {
+			get { throw new NotImplementedException(); }
+		}
+
+		public System.Linq.Expressions.Expression Expression {
+			get {
+				return _stored.AsQueryable().Expression;
+			}
+		}
+
+		public IQueryProvider Provider {
+			get {
+				return new CaseInsensitiveQueries(_stored.AsQueryable().Provider);
+			}
+		}
+
+		#region ITable members
+		public void Attach(object entity, object original) {
+			throw new NotImplementedException();
+		}
+
+		public void Attach(object entity, bool asModified) {
+			throw new NotImplementedException();
+		}
+
+		public void Attach(object entity) {
+			throw new NotImplementedException();
+		}
+
+		public void AttachAll(System.Collections.IEnumerable entities, bool asModified) {
+			throw new NotImplementedException();
+		}
+
+		public void AttachAll(System.Collections.IEnumerable entities) {
+			throw new NotImplementedException();
+		}
+
+		public DataContext Context {
+			get { throw new NotImplementedException(); }
+		}
+
+		public void DeleteAllOnSubmit(System.Collections.IEnumerable entities) {
+			throw new NotImplementedException();
+		}
+
+		public void DeleteOnSubmit(object entity) {
+			DeleteOnSubmit((TEntity)entity);
+		}
+
+		public ModifiedMemberInfo[] GetModifiedMembers(object entity) {
+			throw new NotImplementedException();
+		}
+
+		public object GetOriginalEntityState(object entity) {
+			throw new NotImplementedException();
+		}
+
+		public void InsertAllOnSubmit(System.Collections.IEnumerable entities) {
+			throw new NotImplementedException();
+		}
+
+		public void InsertOnSubmit(object entity) {
+			InsertOnSubmit((TEntity)entity);
+		}
+
+		public bool IsReadOnly {
+			get { throw new NotImplementedException(); }
+		}
+		#endregion
+	}
+	#endregion
+
+	#region CaseInsensitiveQueries
+	/// <summary>
+	/// Modifies expressions to mimic SQL Server's case-insenstive string comparison
+	/// </summary>
+	public class CaseInsensitiveQueries : ExpressionVisitor, IQueryProvider {
+		public static bool Equal(string a, string b) {
+			return a.Equals(b, StringComparison.OrdinalIgnoreCase);
+		}
+
+		public static bool NotEqual(string a, string b) {
+			return !a.Equals(b, StringComparison.OrdinalIgnoreCase);
+		}
+
+		public static bool Contains(string a, string b) {
+			return a.IndexOf(b, StringComparison.OrdinalIgnoreCase) != -1;
+		}
+
+		IQueryProvider _provider;
+		public CaseInsensitiveQueries(IQueryProvider provider) {
+			_provider = provider;
+		}
+
+		protected override Expression VisitBinary(BinaryExpression node) {
+			if(node.Method != null && node.Method.DeclaringType == typeof(string)) {
+				if(node.NodeType == ExpressionType.Equal) {
+					var method = this.GetType().GetMethod("Equal");
+					return Expression.MakeBinary(ExpressionType.Equal, node.Left, node.Right, node.IsLiftedToNull, method);
+				} else if(node.NodeType == ExpressionType.NotEqual) {
+					var method = this.GetType().GetMethod("NotEqual");
+					return Expression.MakeBinary(ExpressionType.Equal, node.Left, node.Right, node.IsLiftedToNull, method);
+				}
+			}
+
+			return base.VisitBinary(node);
+		}
+
+		protected override Expression VisitMethodCall(MethodCallExpression node) {
+			if(node.Method.DeclaringType == typeof(string)) {
+				if(node.Method.Name == "Contains") {
+					var method = this.GetType().GetMethod("Contains");
+					return Expression.Call(method, node.Object, node.Arguments[0]);
+				}
+			}
+			return base.VisitMethodCall(node);
+		}
+
+		public IQueryable<TElement> CreateQuery<TElement>(Expression expression) {
+			return _provider.CreateQuery<TElement>(Visit(expression));
+		}
+
+		public IQueryable CreateQuery(Expression expression) {
+			return _provider.CreateQuery(Visit(expression));
+		}
+
+		public TResult Execute<TResult>(Expression expression) {
+			return _provider.Execute<TResult>(Visit(expression));
+		}
+
+		public object Execute(Expression expression) {
+			return _provider.Execute(Visit(expression));
+		}
+	}
+	#endregion
+	
+	public static class ITableExtensions {
+		public static void InsertAllOnSubmit<TEntity>(this ITable<TEntity> table, IEnumerable<TEntity> entities) where TEntity : class {
+			var realTable = table as Table<TEntity>;
+			if(realTable != null) {
+				realTable.InsertAllOnSubmit(entities);
+				return;
+			}
+			
+			foreach(var entity in entities) {
+				table.InsertOnSubmit(entity);
+			}
+		}
+
+		public static void DeleteAllOnSubmit<TEntity>(this ITable<TEntity> table, IEnumerable<TEntity> entities) where TEntity : class {
+			var realTable = table as Table<TEntity>;
+			if(realTable != null) {
+				realTable.DeleteAllOnSubmit(entities);
+				return;
+			}
+			
+			foreach(var entity in entities) {
+				table.DeleteOnSubmit(entity);
+			}
+		}
+	}
+	
+	#endregion
+}
