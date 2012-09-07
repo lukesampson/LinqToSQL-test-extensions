@@ -229,7 +229,7 @@ namespace <#= ns #> {
 								}
 							};
 						}
-						_context.GetTable<Entity>().InsertOnSubmit((Entity)fk_entity);
+						_context.GetTable<TEntity>().InsertOnSubmit((TEntity)fk_entity);
 					}
 				}
 
