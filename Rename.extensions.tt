@@ -128,8 +128,12 @@ namespace <#= ns #> {
 		}
 
 		public void Dispose() {
-			// no un-managed resources, let GC handle it
+            Dispose(true);
+            GC.SuppressFinalize(this);
 		}
+
+        protected virtual void Dispose(bool disposing) {
+        }
 	}
 	#endregion
 	
@@ -229,7 +233,7 @@ namespace <#= ns #> {
 								}
 							};
 						}
-						_context.GetTable<TEntity>().InsertOnSubmit((TEntity)fk_entity);
+						_context.GetTable(fk_entity.GetType()).InsertOnSubmit(fk_entity);
 					}
 				}
 
@@ -246,7 +250,7 @@ namespace <#= ns #> {
 		}
 
 		public Type ElementType {
-			get { throw new NotImplementedException(); }
+			get { return typeof(TEntity); }
 		}
 
 		public System.Linq.Expressions.Expression Expression {
@@ -283,7 +287,7 @@ namespace <#= ns #> {
 		}
 
 		public DataContext Context {
-			get { throw new NotImplementedException(); }
+			get { throw new NotSupportedException(); }
 		}
 
 		public void DeleteAllOnSubmit(System.Collections.IEnumerable entities) {
@@ -303,7 +307,9 @@ namespace <#= ns #> {
 		}
 
 		public void InsertAllOnSubmit(System.Collections.IEnumerable entities) {
-			throw new NotImplementedException();
+			foreach(var entity in entities) {
+				InsertOnSubmit(entity);
+			}
 		}
 
 		public void InsertOnSubmit(object entity) {
@@ -311,7 +317,7 @@ namespace <#= ns #> {
 		}
 
 		public bool IsReadOnly {
-			get { throw new NotImplementedException(); }
+			get { return false; }
 		}
 		#endregion
 	}
