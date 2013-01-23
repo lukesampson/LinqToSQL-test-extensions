@@ -10,7 +10,7 @@
 <#@ import namespace="System.Linq" #>
 <#@ import namespace="EnvDTE" #>
 <#
-var dbmlFileName = Host.TemplateFile.Substring(0, Host.TemplateFile.IndexOf('.')) + ".dbml";
+var dbmlFileName = Path.GetFileName(Host.TemplateFile).Replace(".extensions.tt", String.Empty) + ".dbml";
 var dbmlDir = Path.GetDirectoryName(Host.TemplateFile);
 var dbmlPath = Path.Combine(dbmlDir, dbmlFileName);
 
