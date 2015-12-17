@@ -25,7 +25,9 @@ var projDir = Path.GetDirectoryName(proj.FullName);
 string relDir = dbmlDir.Substring(projDir.Length).Trim('\\');
 var ns = baseNs;
 foreach(var part in relDir.Split('\\')) {
-	ns += "." + part;
+	if (!string.IsNullOrEmpty(part)) {
+		ns += "." + part;
+	}
 }
 
 var xml = XDocument.Load(dbmlPath);
@@ -46,13 +48,15 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.ComponentModel;
+using SchreudersAPI.Repositories.DAL;
+using Module = System.Reflection.Module;
 
 namespace <#= ns #> {
 
 	#region <#= iface #>
 	public interface <#= iface #> : IDisposable {
 		<# foreach(XElement table in dbEl.Elements(xns + "Table")) { #>
-		
+
 		ITable<<#= table.Element(xns + "Type").Attribute("Name").Value #>> <#= table.Attribute("Member").Value #> { get; }
 		<# } #>
 
@@ -65,19 +69,18 @@ namespace <#= ns #> {
 	#region Partial class extensions to <#= className #>
 	public partial class <#= className #> : <#= iface #> {
 		<# foreach(XElement table in dbEl.Elements(xns + "Table")) { #>
-		
+
 		ITable<<#= table.Element(xns + "Type").Attribute("Name").Value #>> <#= iface #>.<#= table.Attribute("Member").Value #> {
-			get { return this.<#= table.Attribute("Member").Value #>; }
+			get { return ((<#= iface #>)this).<#= table.Attribute("Member").Value #>; }
 		}
 		<# } #>
 
 		ITable<TEntity> <#= iface #>.GetTable<TEntity>() {
-			return this.GetTable<TEntity>();
+			return ((<#= iface #>)this).GetTable<TEntity>();
 		}
-		
 	}
 	#endregion
-	
+
 	#region In-memory version of <#= iface #>
 	public class Memory<#= className #> : IMockDataContext, <#= iface #> {
 
@@ -85,7 +88,7 @@ namespace <#= ns #> {
 		static MappingSource mappingSource = new AttributeMappingSource();
 
 		<# foreach(XElement table in dbEl.Elements(xns + "Table")) { #>
-		
+
 		public ITable<<#= table.Element(xns + "Type").Attribute("Name").Value #>> <#= table.Attribute("Member").Value #> {
 			get { return GetTable<<#= table.Element(xns + "Type").Attribute("Name").Value #>>(); }
 		}
@@ -136,18 +139,18 @@ namespace <#= ns #> {
         }
 	}
 	#endregion
-	
+
 	#region Supporting code for in-memory testing
 	public interface IMockDataContext {
 		MetaModel Mapping { get; }
 		ITable<TEntity> GetTable<TEntity>() where TEntity: class;
 		ITable GetTable(Type type);
 	}
-	
+
 	public interface IMockTable {
 		void SubmitChanges();
 	}
-	
+
 	#region MemoryTable
 	public class MemoryTable<TEntity> : IMockTable, ITable, ITable<TEntity> where TEntity : class {
 		IMockDataContext _context;
@@ -386,7 +389,7 @@ namespace <#= ns #> {
 		}
 	}
 	#endregion
-	
+
 	public static class ITableExtensions {
 		public static void InsertAllOnSubmit<TEntity>(this ITable<TEntity> table, IEnumerable<TEntity> entities) where TEntity : class {
 			var realTable = table as Table<TEntity>;
@@ -394,7 +397,7 @@ namespace <#= ns #> {
 				realTable.InsertAllOnSubmit(entities);
 				return;
 			}
-			
+
 			foreach(var entity in entities) {
 				table.InsertOnSubmit(entity);
 			}
@@ -406,12 +409,12 @@ namespace <#= ns #> {
 				realTable.DeleteAllOnSubmit(entities);
 				return;
 			}
-			
+
 			foreach(var entity in entities) {
 				table.DeleteOnSubmit(entity);
 			}
 		}
 	}
-	
+
 	#endregion
 }
