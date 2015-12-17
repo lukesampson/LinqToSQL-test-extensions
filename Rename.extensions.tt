@@ -78,6 +78,17 @@ namespace <#= ns #> {
 		ITable<TEntity> <#= iface #>.GetTable<TEntity>() {
 			return ((<#= iface #>)this).GetTable<TEntity>();
 		}
+
+	    public void SubmitChanges()
+	    {
+	        ((<#= className #>)this).SubmitChanges();
+	    }
+
+
+	    public void Dispose()
+	    {
+	        ((<#= className #>)this).Dispose();
+	    }
 	}
 	#endregion
 
