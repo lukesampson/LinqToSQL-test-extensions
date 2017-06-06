@@ -25,7 +25,10 @@ var projDir = Path.GetDirectoryName(proj.FullName);
 string relDir = dbmlDir.Substring(projDir.Length).Trim('\\');
 var ns = baseNs;
 foreach(var part in relDir.Split('\\')) {
-	ns += "." + part;
+	if (!string.IsNullOrEmpty(part))
+	{
+		ns += "." + part;
+	}
 }
 
 var xml = XDocument.Load(dbmlPath);
